@@ -45,3 +45,38 @@ jobs:
 
           print(f"Bundle coerente: versionCode={manifest['versionCode']} versionName={manifest['versionName']} sha256={actual}")
           PY
+
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          test -x "$AAPT" || { echo "aapt non trovato: $AAPT" >&2; exit 1; }
+          test -x "$APKSIGNER" || { echo "apksigner non trovato: $APKSIGNER" >&2; exit 1; }
+
+          BADGING="$("$AAPT" dump badging myMDB-release.apk | head -n1)"
+          PACKAGE_NAME="$(printf '%s\n' "$BADGING" | sed -n "s/.*package: name='\([^']*\)'.*/\1/p")"
+          APK_VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
+          APK_VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+
+          MANIFEST_VERSION_CODE="$(python3 -c 'import json; print(json.load(open("latest.json"))["versionCode"])')"
+          MANIFEST_VERSION_NAME="$(python3 -c 'import json; print(json.load(open("latest.json"))["versionName"])')"
+
+          test "$PACKAGE_NAME" = "it.stefanodiconcetto.mymdb" || {
+            echo "Package APK inatteso: $PACKAGE_NAME" >&2
+            exit 1
+          }
+          test "$APK_VERSION_CODE" = "$MANIFEST_VERSION_CODE" || {
+            echo "versionCode APK/manifest non coerente: $APK_VERSION_CODE != $MANIFEST_VERSION_CODE" >&2
+            exit 1
+          }
+          test "$APK_VERSION_NAME" = "$MANIFEST_VERSION_NAME" || {
+            echo "versionName APK/manifest non coerente: $APK_VERSION_NAME != $MANIFEST_VERSION_NAME" >&2
+            exit 1
+          }
+
+          EXPECTED_CERT_SHA256="3d3cacaa762dfecaf1dc6e47c2f20ef0087e3a70a0a89faa409273408d52bfc5"
+          ACTUAL_CERT_SHA256="$("$APKSIGNER" verify --print-certs myMDB-release.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]' | head -n1)"
+          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256" || {
+            echo "Firma APK incompatibile: attesa $EXPECTED_CERT_SHA256, trovata $ACTUAL_CERT_SHA256" >&2
+            exit 1
+          }
+
+          echo "APK valida: package=$PACKAGE_NAME versionCode=$APK_VERSION_CODE versionName=$APK_VERSION_NAME certificato=$ACTUAL_CERT_SHA256"
