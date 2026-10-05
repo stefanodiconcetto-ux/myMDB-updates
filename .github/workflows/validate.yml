@@ -1,0 +1,47 @@
+name: Validate update channel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate published bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f latest.json && ! -f myMDB-release.apk ]]; then
+            echo "Canale inizializzato: nessuna release pubblicata."
+            exit 0
+          fi
+
+          [[ -f latest.json ]] || { echo "Manca latest.json" >&2; exit 1; }
+          [[ -f myMDB-release.apk ]] || { echo "Manca myMDB-release.apk" >&2; exit 1; }
+
+          python3 - <<'PY'
+          import json, hashlib, pathlib, re, sys
+
+          manifest = json.loads(pathlib.Path("latest.json").read_text())
+          required = {"versionCode", "versionName", "apkUrl", "sha256"}
+          if set(manifest) != required:
+              raise SystemExit(f"Campi manifest inattesi: {sorted(manifest)}")
+          if not isinstance(manifest["versionCode"], int) or manifest["versionCode"] <= 0:
+              raise SystemExit("versionCode non valido")
+          if not isinstance(manifest["versionName"], str) or not manifest["versionName"].strip():
+              raise SystemExit("versionName non valido")
+          expected_url = "https://raw.githubusercontent.com/stefanodiconcetto-ux/myMDB-updates/main/myMDB-release.apk"
+          if manifest["apkUrl"] != expected_url:
+              raise SystemExit(f"apkUrl inatteso: {manifest['apkUrl']}")
+          if not re.fullmatch(r"[0-9a-fA-F]{64}", manifest["sha256"]):
+              raise SystemExit("sha256 non valido")
+
+          actual = hashlib.sha256(pathlib.Path("myMDB-release.apk").read_bytes()).hexdigest()
+          if actual.lower() != manifest["sha256"].lower():
+              raise SystemExit(f"SHA-256 non coerente: manifest={manifest['sha256']} apk={actual}")
+
+          print(f"Bundle coerente: versionCode={manifest['versionCode']} versionName={manifest['versionName']} sha256={actual}")
+          PY
